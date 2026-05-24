@@ -1,0 +1,6 @@
+services:
+  printspectacle:
+    image: ${DOCKER_REGISTRY-}printspectacle
+    build:
+      context: .
+      dockerfile: PrintSpectacle/Dockerfile

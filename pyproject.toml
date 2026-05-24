@@ -1,0 +1,11 @@
+[project]
+name = "printspectacle"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "confighelper>=0.0.3",
+    "tornado>=6.5.5",
+    "webcam>=1.34",
+]

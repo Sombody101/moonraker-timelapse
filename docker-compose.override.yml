@@ -1,0 +1,9 @@
+services:
+  printspectacle:
+    volumes:
+      - C:\print-spectacle:/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+    ports:
+      - "7080:8080"
