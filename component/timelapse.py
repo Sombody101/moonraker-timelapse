@@ -490,6 +490,7 @@ class Timelapse:
                 body=json.dumps(capture_request),
             )
 
+            logging.info(f"Requesting capture from: {capture_url}")
             await client.fetch(request)
 
             result.update(
@@ -726,7 +727,7 @@ class Timelapse:
             response = await client.fetch(status_url)
             json_doc = json.loads(response.body.decode("utf-8"))
 
-            status = str(json_doc["status"])
+            status = str(json_doc["status"]).lower()
 
             if status in ("running", "starting"):
                 continue
@@ -745,6 +746,9 @@ class Timelapse:
 
             elif status == "errored":
                 raise Exception(str(json_doc.get("result")))
+
+            else:
+                raise Exception(f"Unknown state '{status}'")
 
     async def download_timelapse_render(self, jobId: str, local_target: str):
         server_url = self.config["render_server"]
