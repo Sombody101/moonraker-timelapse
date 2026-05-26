@@ -720,29 +720,27 @@ class Timelapse:
             json_doc = json.loads(response.body.decode("utf-8"))
 
             status = str(json_doc["status"])
-            match status:
-                case "running" | "starting":
-                    continue
 
-                case "complete":
-                    return
+            if status in ("running", "starting"):
+                continue
 
-                case "idle":
-                    idle_count += 1
+            elif status == "complete":
+                return
 
-                    if idle_count == (60 / 5):
-                        raise Exception("Render has ben idled for 60 seconds; aborting")
+            elif status == "idle":
+                idle_count += 1
+                if idle_count == (60 / 5):
+                    raise Exception("Render has been idled for 60 seconds; aborting")
 
-                case "invalid":
-                    raise Exception(
-                        f"Server claims job is invalid: {str(json_doc["result"] or "[no message]")}"
-                    )
+            elif status == "invalid":
+                result_msg = str(json_doc.get("result") or "[no message]")
+                raise Exception(f"Server claims job is invalid: {result_msg}")
 
-                case "errored":
-                    raise Exception(str(json_doc["result"]))
+            elif status == "errored":
+                raise Exception(str(json_doc.get("result")))
 
     async def download_timelapse_render(self, jobId: str, local_target: str):
-        server_url = self.config['render_server']
+        server_url = self.config["render_server"]
         download_url = f"{server_url}/api/timelapse/download/{jobId}"
         logging.info(f"Downloading timelapse for print: {download_url}")
 
