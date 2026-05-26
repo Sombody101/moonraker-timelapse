@@ -729,6 +729,8 @@ class Timelapse:
 
             status = str(json_doc["status"]).lower()
 
+            logging.info(f"Got '{status}'")
+
             if status in ("running", "starting"):
                 continue
 

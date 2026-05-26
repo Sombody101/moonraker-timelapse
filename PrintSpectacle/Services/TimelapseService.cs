@@ -156,7 +156,8 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
             .FirstOrDefault()
             ?? throw new InvalidOperationException("Failed to get final layer for duplication");
 
-        if (!int.TryParse(lastFrame.TrimStart('/').Replace(".jpg", ""), out int layer))
+        lastFrame = lastFrame.TrimStart('/');
+        if (!int.TryParse(lastFrame.Replace(".jpg", ""), out int layer))
         {
             throw new InvalidOperationException("Unable to get layer number for final layer duplication");
         }
