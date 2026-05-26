@@ -10,7 +10,8 @@ public sealed class FfmpegHost : IDisposable
 
     public FfmpegHost(string sourceDirectory, string outputPath)
     {
-        string args = ArgumentProvider.CreateFfmpegArgs(outputPath);
+        int frameCount = GetFrameCount(sourceDirectory);
+        string args = ArgumentProvider.CreateFfmpegArgs(outputPath, frameCount);
 
         _ffmpegProcess = new Process()
         {
@@ -53,9 +54,14 @@ public sealed class FfmpegHost : IDisposable
         _ffmpegProcess?.Dispose();
     }
 
+    private int GetFrameCount(string frameDirectory)
+    {
+        return Directory.GetFiles(frameDirectory).Length;
+    }
+
     private static class ArgumentProvider
     {
-        private const string ARGS_SW = "-loglevel error -framerate 30 -i \"%d.jpg\" -threads {1} -g 5 -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -y {0}";
+        private const string ARGS_SW = "-loglevel error -framerate {2} -i \"%6d.jpg\" -threads {1} -g 5 -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -y {0}";
 
         [Obsolete]
         private const string
@@ -64,12 +70,18 @@ public sealed class FfmpegHost : IDisposable
 
         private static CpuVendor? s_cachedVendor;
 
-        public static string CreateFfmpegArgs(string outputPath)
+        public static string CreateFfmpegArgs(string outputPath, int frameCount)
         {
             ContainerConfiguration config = Program.GetRequiredService<ContainerConfiguration>();
+            int targetFps = CalculateTargetFps(frameCount);
 
             string argsFormatter = GetArgsString();
-            return string.Format(argsFormatter, outputPath, config.Threads);
+            return string.Format(argsFormatter, outputPath, config.Threads, targetFps);
+        }
+
+        private static int CalculateTargetFps(int frameCount)
+        {
+            return Math.Max(Math.Min(frameCount / 10, 60), 5);
         }
 
         private static string GetArgsString()

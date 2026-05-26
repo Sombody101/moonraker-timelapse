@@ -78,7 +78,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
 
         string jobDirectory = GetCaptureDirectory(jobId);
         _ = Directory.CreateDirectory(jobDirectory);
-        string snapshotPath = Path.Combine(jobDirectory, $"{layer}.jpg");
+        string snapshotPath = Path.Combine(jobDirectory, $"{layer.ToString().PadLeft(6, '0')}.jpg");
 
         if (!force && File.Exists(snapshotPath))
         {
@@ -90,7 +90,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         await FetchCaptureAsync(cameraUrl, snapshotPath, token);
     }
 
-    private static async Task RenderAsync(string jobId, bool force, CancellationToken token)
+    private async Task RenderAsync(string jobId, bool force, CancellationToken token)
     {
         JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
         jobHandle.Status = JobManager.JobStatus.Starting;
@@ -116,6 +116,8 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
 
         using FfmpegHost ffmpeg = new(captureDirectory, outputTimelapse);
 
+        DuplicateFinalFrame(captureDirectory);
+
         jobHandle.Status = JobManager.JobStatus.Running;
 
         try
@@ -129,6 +131,39 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         }
 
         jobHandle.Status = JobManager.JobStatus.Complete;
+    }
+
+    private static void DuplicateFinalFrame(string directory)
+    {
+        const string INFLATE_FILE = ".inflate";
+
+        string inflateFile = Path.Combine(directory, INFLATE_FILE);
+        if (File.Exists(inflateFile))
+        {
+            return;
+        }
+
+        string lastFrame = Directory.GetFiles(directory, "*.jpg")
+            .Select(s => s.TrimStart(directory).ToString())
+            .OrderByDescending(f => f)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("Failed to get final layer for duplication");
+
+        if (!int.TryParse(lastFrame.TrimEnd(".jpg"), out int layer))
+        {
+            throw new InvalidOperationException("Unable to get layer number for final layer duplication");
+        }
+
+        string sourceFile = Path.Combine(directory, lastFrame);
+        int target = layer + 5;
+        layer++;
+        for (; layer <= target; ++layer)
+        {
+            string duplicateFrame = Path.Combine(directory, $"{layer.ToString().PadLeft(6, '0')}.jpg");
+            File.Copy(sourceFile, duplicateFrame);
+        }
+
+        File.Create(inflateFile).Close();
     }
 
     private async Task FetchCaptureAsync(string url, string outputPath, CancellationToken token)
