@@ -710,12 +710,13 @@ class Timelapse:
         )
 
         init_res = await client.fetch(init_req)
-        status_url = init_res.body.decode("utf-8")
+        status_url = f"{server_url}/{init_res.body.decode("utf-8")}"
 
         waiting = True
         idle_count = 0
         while waiting:
             await asyncio.sleep(5)
+            logging.info(f"Fetching render status from: {status_url}")
             response = await client.fetch(status_url)
             json_doc = json.loads(response.body.decode("utf-8"))
 
