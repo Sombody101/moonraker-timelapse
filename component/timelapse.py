@@ -126,6 +126,7 @@ class Timelapse:
         # evaluate and expand "~"
         self.out_dir = os.path.expanduser(out_dir_cfg)
         self.temp_dir = os.path.expanduser(temp_dir_cfg)
+        self.job_id = ""
         # create directories if they doesn't exist
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.out_dir, exist_ok=True)
@@ -148,6 +149,7 @@ class Timelapse:
         self.server.register_remote_method(
             "timelapse_saveFrames", self.call_saveFramesZip
         )
+        self.server.register_remote_method("timelapse_init", self.timelapse_init)
         self.server.register_remote_method("timelapse_render", self.call_render)
         self.server.register_endpoint(
             "/machine/timelapse/render", ["POST"], self.render
@@ -164,6 +166,10 @@ class Timelapse:
 
     async def component_init(self) -> None:
         await self.getWebcamConfig()
+
+    def timelapse_init(self, file_name: str):
+        now = datetime.now().strftime("%Y.%d.%m.%H.%M")
+        self.job_id = f"print_{file_name}_{now}"
 
     def overwriteDbconfigWithConfighelper(self) -> None:
         blockedsettings = []
@@ -465,7 +471,6 @@ class Timelapse:
         self.framecount += 1
         framefile = "frame" + str(self.framecount).zfill(6) + ".jpg"
         snapshot_url = self.config["snapshoturl"]
-        print_name = await self.get_print_job_id()
 
         result = {"action": "newframe"}
         try:
@@ -473,7 +478,7 @@ class Timelapse:
             server_url = self.config["render_server"]
             capture_url = f"{server_url}/api/timelapse/capture"
             capture_request = {
-                "job_id": print_name,
+                "job_id": self.job_id,
                 "layer": self.framecount,
                 "snapshot_url": snapshot_url,
             }
@@ -646,9 +651,10 @@ class Timelapse:
         # run the command
         self.notify_event(result)
         render_status = True
+        job_id = self.job_id
         try:
-            await self.spinlock_render_request(gcodefilename)
-            await self.download_timelapse_render(gcodefilename, outfile_path)
+            await self.spinlock_render_request(job_id)
+            await self.download_timelapse_render(job_id, outfile_path)
         except Exception as ex:
             logging.exception(f"Render request failed: {ex}")
             render_status = False
@@ -709,9 +715,8 @@ class Timelapse:
             body=json.dumps({"job_id": jobId}),
         )
 
-        init_res = await client.fetch(init_req)
-        status_endpoint = init_res.body.decode("utf-8")
-        status_url = f"{server_url}/{status_endpoint}"
+        await client.fetch(init_req)
+        status_url = f"{server_url}/api/timelapse/status/{jobId}"
 
         waiting = True
         idle_count = 0
@@ -770,7 +775,7 @@ class Timelapse:
             except Exception as e:
                 raise Exception(f"Failed to stream download from server: {e}")
 
-    async def get_print_job_id(self) -> str:
+    async def get_print_job_id(self):
         kresult = await self.klippy_apis.query_objects({"print_stats": None})
         pstats = kresult.get("print_stats", {})
         return pstats.get("filename", "").split("/")[-1]
