@@ -499,8 +499,8 @@ class Timelapse:
                     "status": "success",
                 }
             )
-        except Exception:
-            logging.exception(f"Error requesting capture")
+        except Exception as ex:
+            logging.exception(f"Error requesting capture: {ex}")
             self.framecount -= 1
             result.update({"status": "error"})
 
