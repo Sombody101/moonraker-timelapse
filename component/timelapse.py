@@ -1,12 +1,15 @@
 from __future__ import annotations
 import logging
 import os
+import time
 import glob
 import re
 import shutil
+import json
 import asyncio
 from datetime import datetime
 from tornado.ioloop import IOLoop
+from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from zipfile import ZipFile
 
 # Annotation imports
@@ -61,6 +64,7 @@ class Timelapse:
             "mode": "layermacro",
             "camera": "",
             "snapshoturl": "http://localhost:8080/?action=snapshot",
+            "render_server": "http://localhost:7080/",
             "stream_delay_compensation": 0.05,
             "gcode_verbose": False,
             "parkhead": False,
@@ -458,32 +462,30 @@ class Timelapse:
         # make sure webcamconfig is uptodate before grabbing a new frame
         await self.getWebcamConfig()
 
-        options = ""
-        if self.wget_skip_cert:
-            options += "--no-check-certificate "
-
         self.framecount += 1
         framefile = "frame" + str(self.framecount).zfill(6) + ".jpg"
-        cmd = (
-            "wget "
-            + options
-            + self.config["snapshoturl"]
-            + " -O "
-            + self.temp_dir
-            + framefile
-        )
-        self.lastframefile = framefile
-        logging.debug(f"cmd: {cmd}")
-
-        shell_cmd: SCMDComp = self.server.lookup_component("shell_command")
-        scmd = shell_cmd.build_shell_command(cmd, None)
-        try:
-            cmdstatus = await scmd.run(timeout=2.0, verbose=False)
-        except Exception:
-            logging.exception(f"Error running cmd '{cmd}'")
+        snapshot_url = self.config["snapshoturl"]
+        print_name = await self.get_print_job_id()
 
         result = {"action": "newframe"}
-        if cmdstatus:
+        try:
+            client = AsyncHTTPClient()
+            capture_url = f"{self.config["render_server"]}/api/timelapse/capture"
+            capture_request = {
+                "job_id": print_name,
+                "layer": self.framecount,
+                "snapshot_url": snapshot_url,
+            }
+
+            request = HTTPRequest(
+                url=capture_url,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                body=json.dumps(capture_request),
+            )
+
+            await client.fetch(request)
+
             result.update(
                 {
                     "frame": str(self.framecount),
@@ -491,8 +493,8 @@ class Timelapse:
                     "status": "success",
                 }
             )
-        else:
-            logging.info(f"getting newframe failed: {cmd}")
+        except Exception:
+            logging.exception(f"Error requesting capture")
             self.framecount -= 1
             result.update({"status": "error"})
 
@@ -593,215 +595,83 @@ class Timelapse:
         ioloop = IOLoop.current()
         ioloop.spawn_callback(self.render)
 
+        # dublicate last frame
+        # duplicates = []
+        # if self.config["duplicatelastframe"] > 0:
+        #    lastframe = filelist[-1:][0]
+        #    for i in range(self.config["duplicatelastframe"]):
+        #        nextframe = str(self.framecount + i + 1).zfill(6)
+        #        duplicate = "frame" + nextframe + ".jpg"
+        #        duplicatePath = self.temp_dir + duplicate
+        #        duplicates.append(duplicatePath)
+        #        try:
+        #            shutil.copy(lastframe, duplicatePath)
+        #        except OSError as err:
+        #            logging.info(f"duplicating last frame failed: {err}")
+        #    # update Filelist
+        #    filelist = sorted(glob.glob(self.temp_dir + "frame*.jpg"))
+        #    self.framecount = len(filelist)
+
     async def render(self, webrequest=None):
-        filelist = sorted(glob.glob(self.temp_dir + "frame*.jpg"))
-        self.framecount = len(filelist)
         result = {"action": "render"}
 
         # make sure webcamconfig is uptodate for the rotation/flip feature
         await self.getWebcamConfig()
 
-        if not filelist:
-            msg = "no frames to render, skip"
-            status = "skipped"
-        elif self.renderisrunning:
+        if self.renderisrunning:
             msg = "render is already running"
-            status = "running"
-        elif not self.ffmpeg_installed:
-            msg = f"{self.ffmpeg_binary_path} not found, please install ffmpeg"
-            status = "error"
-            # cmd = outfile = None
-            logging.info(f"timelapse: {msg}")
-        else:
-            self.renderisrunning = True
+            result.update({"status": "running", "msg": msg})
+            return result
+        self.renderisrunning = True
 
-            # get printed filename
-            kresult = await self.klippy_apis.query_objects({"print_stats": None})
-            pstats = kresult.get("print_stats", {})
-            gcodefilename = pstats.get("filename", "").split("/")[-1]
+        # get printed filename
+        gcodefilename = await self.get_print_job_id()
 
-            # prepare output filename
-            now = datetime.now()
-            date_time = now.strftime(self.config["time_format_code"])
-            inputfiles = self.temp_dir + "frame%6d.jpg"
-            outfile = f"timelapse_{gcodefilename}_{date_time}"
+        # prepare output filename
+        now = datetime.now()
+        date_time = now.strftime(self.config["time_format_code"])
+        outfile = f"timelapse_{gcodefilename}_{date_time}.mp4"
+        outfile_path = f"{self.temp_dir}/{outfile}"
 
-            # dublicate last frame
-            duplicates = []
-            if self.config["duplicatelastframe"] > 0:
-                lastframe = filelist[-1:][0]
+        # log and notify ws
+        logging.info("Request render")
+        result.update(
+            {
+                "status": "started",
+                "framecount": str(self.framecount),
+            }
+        )
 
-                for i in range(self.config["duplicatelastframe"]):
-                    nextframe = str(self.framecount + i + 1).zfill(6)
-                    duplicate = "frame" + nextframe + ".jpg"
-                    duplicatePath = self.temp_dir + duplicate
-                    duplicates.append(duplicatePath)
-                    try:
-                        shutil.copy(lastframe, duplicatePath)
-                    except OSError as err:
-                        logging.info(f"duplicating last frame failed: {err}")
+        # run the command
+        self.notify_event(result)
+        render_status = True
+        try:
+            await self.spinlock_render_request(gcodefilename)
+            await self.download_timelapse_render(gcodefilename, outfile_path)
+        except Exception as ex:
+            logging.exception(f"Render request failed: {ex}")
+            render_status = False
 
-                # update Filelist
-                filelist = sorted(glob.glob(self.temp_dir + "frame*.jpg"))
-                self.framecount = len(filelist)
+        # check success
+        if render_status:
+            status = "success"
+            msg = f"Rendering Video successful: {outfile}.mp4"
+            result.update({"filename": f"{outfile}.mp4", "printfile": gcodefilename})
 
-            # variable framerate
-            if self.config["variable_fps"]:
-                fps = int(self.framecount / self.config["targetlength"])
-                fps = max(
-                    min(fps, self.config["variable_fps_max"]),
-                    self.config["variable_fps_min"],
-                )
-            else:
-                fps = self.config["output_framerate"]
-
-            # apply rotation
-            filterParam = ""
-            if self.config["rotation"] == 90 and self.config["flip_y"]:
-                filterParam = " -vf 'transpose=3'"
-            elif self.config["rotation"] == 90:
-                filterParam = " -vf 'transpose=1'"
-            elif self.config["rotation"] == 180:
-                filterParam = " -vf 'hflip,vflip'"
-            elif self.config["rotation"] == 270:
-                filterParam = " -vf 'transpose=2'"
-            elif self.config["rotation"] == 270 and self.config["flip_y"]:
-                filterParam = " -vf 'transpose=0'"
-            elif self.config["rotation"] > 0:
-                pi = 3.141592653589793
-                rot = str(self.config["rotation"] * (pi / 180))
-                filterParam = " -vf 'rotate=" + rot + "'"
-            elif self.config["flip_x"] and self.config["flip_y"]:
-                filterParam = " -vf 'hflip,vflip'"
-            elif self.config["flip_x"]:
-                filterParam = " -vf 'hflip'"
-            elif self.config["flip_y"]:
-                filterParam = " -vf 'vflip'"
-
-            # build shell command
-            cmd = (
-                self.ffmpeg_binary_path
-                + " -r "
-                + str(fps)
-                + " -i '"
-                + inputfiles
-                + "'"
-                + filterParam
-                + " -threads 2 -g 5"
-                + " -crf "
-                + str(self.config["constant_rate_factor"])
-                + " -vcodec libx264"
-                + " -pix_fmt "
-                + self.config["pixelformat"]
-                + " -an"
-                + " "
-                + self.config["extraoutputparams"]
-                + " '"
-                + self.temp_dir
-                + outfile
-                + ".mp4' -y"
-            )
-
-            # log and notify ws
-            logging.info(f"start FFMPEG: {cmd}")
-            result.update(
-                {
-                    "status": "started",
-                    "framecount": str(self.framecount),
-                    "settings": {
-                        "framerate": fps,
-                        "crf": self.config["constant_rate_factor"],
-                        "pixelformat": self.config["pixelformat"],
-                    },
-                }
-            )
-
-            # run the command
-            shell_cmd: SCMDComp = self.server.lookup_component("shell_command")
-            self.notify_event(result)
-            scmd = shell_cmd.build_shell_command(cmd, self.ffmpeg_cb)
+            # move finished output file to output directory
             try:
-                cmdstatus = await scmd.run(
-                    verbose=True,
-                    log_complete=False,
-                    timeout=9999999999,
+                shutil.move(
+                    outfile_path,
+                    self.out_dir + outfile,
                 )
-            except Exception:
-                logging.exception(f"Error running cmd '{cmd}'")
+            except OSError as err:
+                logging.info(f"moving output file failed: {err}")
 
-            # check success
-            if cmdstatus:
-                status = "success"
-                msg = f"Rendering Video successful: {outfile}.mp4"
-                result.update(
-                    {"filename": f"{outfile}.mp4", "printfile": gcodefilename}
-                )
-                # result.pop("framecount")
-                result.pop("settings")
+        else:
+            status = "error"
+            msg = f"Video render failed"
 
-                # move finished output file to output directory
-                try:
-                    shutil.move(
-                        self.temp_dir + outfile + ".mp4",
-                        self.out_dir + outfile + ".mp4",
-                    )
-                except OSError as err:
-                    logging.info(f"moving output file failed: {err}")
-
-                # copy image preview
-                if self.config["previewimage"]:
-                    previewFile = f"{outfile}.jpg"
-                    previewFilePath = self.out_dir + previewFile
-                    previewSrc = filelist[-1:][0]
-                    try:
-                        shutil.copy(previewSrc, previewFilePath)
-                    except OSError as err:
-                        logging.info(f"copying preview image failed: {err}")
-                    else:
-                        result.update({"previewimage": previewFile})
-
-                    # apply rotation previewimage if needed
-                    if filterParam or self.config["extraoutputparams"]:
-                        cmd = (
-                            self.ffmpeg_binary_path
-                            + " -i '"
-                            + previewFilePath
-                            + "'"
-                            + filterParam
-                            + " -an"
-                            + " "
-                            + self.config["extraoutputparams"]
-                            + " '"
-                            + previewFilePath
-                            + "' -y"
-                        )
-
-                        logging.info(f"Rotate preview image cmd: {cmd}")
-
-                        scmd = shell_cmd.build_shell_command(cmd)
-                        try:
-                            cmdstatus = await scmd.run(
-                                verbose=True,
-                                log_complete=False,
-                                timeout=9999999999,
-                            )
-                        except Exception:
-                            logging.exception(f"Error running cmd '{cmd}'")
-
-            else:
-                status = "error"
-                msg = f"Rendering Video failed: {cmd} : {self.lastcmdreponse}"
-                result.update({"cmd": cmd, "cmdresponse": self.lastcmdreponse})
-
-            self.renderisrunning = False
-
-            # cleanup duplicates
-            if duplicates:
-                for dupe in duplicates:
-                    try:
-                        os.remove(dupe)
-                    except OSError as err:
-                        logging.info(f"remove duplicate failed: {err}")
+        self.renderisrunning = False
 
         # log and notify ws
         logging.info(msg)
@@ -823,6 +693,84 @@ class Timelapse:
             self.byrendermacro = False
 
         return result
+
+    async def spinlock_render_request(self, jobId: str):
+        render_url = f"{self.config["render_server"]}/api/timelapse/render"
+        logging.info(f"Requesting timelapse render from: {render_url}")
+
+        client = AsyncHTTPClient()
+
+        init_req = HTTPRequest(
+            url=render_url,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"job_id": jobId}),
+        )
+
+        init_res = await client.fetch(init_req)
+        status_url = init_res.body.decode("utf-8")
+
+        waiting = True
+        idle_count = 0
+        while waiting:
+            await asyncio.sleep(5)
+            response = await client.fetch(status_url)
+            json_doc = json.loads(response.body.decode("utf-8"))
+
+            status = str(json_doc["status"])
+            match status:
+                case "running" | "starting":
+                    continue
+
+                case "complete":
+                    return
+
+                case "idle":
+                    idle_count += 1
+
+                    if idle_count == (60 / 5):
+                        raise Exception("Render has ben idled for 60 seconds; aborting")
+
+                case "invalid":
+                    raise Exception(
+                        f"Server claims job is invalid: {str(json_doc["result"] or "[no message]")}"
+                    )
+
+                case "errored":
+                    raise Exception(str(json_doc["result"]))
+
+    async def download_timelapse_render(self, jobId: str, local_target: str):
+        download_url = f"{self.config['render_server']}/api/timelapse/download/{jobId}"
+        logging.info(f"Downloading timelapse for print: {download_url}")
+
+        client = AsyncHTTPClient()
+
+        with open(local_target, "wb") as f:
+
+            def handle_chunk(chunk: bytes):
+                f.write(chunk)
+
+            request = HTTPRequest(
+                url=download_url,
+                method="GET",
+                streaming_callback=handle_chunk,
+                request_timeout=300.0,
+                connect_timeout=20.0,
+            )
+
+            try:
+                response = await client.fetch(request)
+                if response.code != 200:
+                    raise Exception(
+                        f"Download endpoint returned status code {response.code}"
+                    )
+            except Exception as e:
+                raise Exception(f"Failed to stream download from server: {e}")
+
+    async def get_print_job_id(self) -> str:
+        kresult = await self.klippy_apis.query_objects({"print_stats": None})
+        pstats = kresult.get("print_stats", {})
+        return pstats.get("filename", "").split("/")[-1]
 
     def ffmpeg_cb(self, response):
         # logging.debug(f"ffmpeg_cb: {response}")
