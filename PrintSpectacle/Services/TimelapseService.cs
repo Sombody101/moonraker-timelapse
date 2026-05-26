@@ -17,7 +17,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.JobID);
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.SnapshotURL);
 
-            await CaptureAsync(payload.JobID, payload.Layer, payload.SnapshotURL, payload.Force, token);
+            await CaptureAsync(SanitizeJobId(payload.JobID), payload.Layer, payload.SnapshotURL, payload.Force, token);
             return Result.Ok();
         }
         catch (Exception ex)
@@ -34,7 +34,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.JobID);
 
-            await RenderAsync(payload.JobID, payload.Force, token);
+            await RenderAsync(SanitizeJobId(payload.JobID), payload.Force, token);
         }
         catch (Exception ex)
         {
@@ -90,7 +90,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         await FetchCaptureAsync(cameraUrl, snapshotPath, token);
     }
 
-    private async Task RenderAsync(string jobId, bool force, CancellationToken token)
+    private static async Task RenderAsync(string jobId, bool force, CancellationToken token)
     {
         JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
         jobHandle.Status = JobManager.JobStatus.Starting;
@@ -181,6 +181,12 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
     private static string GetTimelapseDirectory(string jobId)
     {
         return Path.Combine(ConstPaths.TIMELAPSE_OUTPUT, jobId);
+    }
+
+    private static string SanitizeJobId(string jobId)
+    {
+        // I'm sure this is [not] enough...
+        return jobId.Replace('/', '_');
     }
 
     private static class JobManager
