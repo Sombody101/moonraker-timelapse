@@ -112,7 +112,8 @@ public sealed class Program
 
         _ = app.MapGet("/api/timelapse/status/{jobId}", async (string jobId, ITimelapseService service) =>
         {
-            return Results.Ok(service.GetJobStatusJson(jobId));
+            // Returns raw string, so cannot be wrapped in Results object
+            return service.GetJobStatusJson(jobId);
         });
 
         _ = app.MapGet("/api/timelapse/download/{jobId}", async (string jobId, ITimelapseService service) =>
