@@ -710,7 +710,8 @@ class Timelapse:
         )
 
         init_res = await client.fetch(init_req)
-        status_url = f"{server_url}/{init_res.body.decode("utf-8")}"
+        status_endpoint = init_res.body.decode("utf-8")
+        status_url = f"{server_url}/{status_endpoint}"
 
         waiting = True
         idle_count = 0
