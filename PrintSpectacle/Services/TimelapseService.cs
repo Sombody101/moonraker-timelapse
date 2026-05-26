@@ -186,7 +186,9 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
     private static string SanitizeJobId(string jobId)
     {
         // I'm sure this is [not] enough...
-        return jobId.Replace('/', '_');
+        return jobId
+            .TrimStart('/')
+            .Replace('/', '_');
     }
 
     private static class JobManager

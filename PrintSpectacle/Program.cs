@@ -78,17 +78,19 @@ public sealed class Program
 
         _ = app.MapPost("/api/timelapse/capture", async (HttpRequest req, ITimelapseService service, CancellationToken token) =>
         {
-            CaptureRequest? capture = await ExtractBodyAsync<CaptureRequest>(req);
-            if (capture is null)
+            Result<CaptureRequest> captureResult = await ExtractBodyAsync<CaptureRequest>(req);
+            if (captureResult.IsFailed)
             {
-                return Results.BadRequest("Invalid JSON format.");
+                return Results.BadRequest(JsonizeError(captureResult.Errors[0].Message));
             }
+
+            CaptureRequest capture = captureResult.Value;
 
             Result result = await service.TakeSnapshotAsync(containerConfig, capture, token);
             if (result.IsFailed)
             {
                 IError error = result.Errors[0];
-                return Results.InternalServerError(error.Message);
+                return Results.InternalServerError(JsonizeError(error.Message));
             }
 
             return Results.Ok();
@@ -96,11 +98,13 @@ public sealed class Program
 
         _ = app.MapPost("/api/timelapse/render", async (HttpRequest req, IBackgroundTaskQueue queue, ITimelapseService service, CancellationToken token) =>
         {
-            RenderRequest? render = await ExtractBodyAsync<RenderRequest>(req);
-            if (render is null)
+            Result<RenderRequest> renderResult = await ExtractBodyAsync<RenderRequest>(req);
+            if (renderResult.IsFailed)
             {
-                return Results.BadRequest("Invalid JSON format.");
+                return Results.BadRequest(JsonizeError(renderResult.Errors[0].Message));
             }
+
+            RenderRequest render = renderResult.Value;
 
             await queue.EnqueueAsync(async token =>
             {
@@ -122,7 +126,7 @@ public sealed class Program
             if (renderStream.IsFailed)
             {
                 IError error = renderStream.Errors[0];
-                return Results.InternalServerError(error.Message);
+                return Results.InternalServerError(JsonizeError(error.Message));
             }
 
             FileStreamResult stream = renderStream.Value;
@@ -136,10 +140,28 @@ public sealed class Program
         app.Run();
     }
 
-    private static async Task<T?> ExtractBodyAsync<T>(HttpRequest request)
+    private static async Task<Result<T>> ExtractBodyAsync<T>(HttpRequest request)
     {
-        using var sr = new StreamReader(request.Body);
-        string body = await sr.ReadToEndAsync();
-        return JsonSerializer.Deserialize<T?>(body);
+        try
+        {
+            using var sr = new StreamReader(request.Body);
+            string body = await sr.ReadToEndAsync();
+            return JsonSerializer.Deserialize<T>(body) ?? throw new InvalidOperationException("Invalid document.");
+        }
+        catch (JsonException jex)
+        {
+            Log.Logger.Error("Unable to parse inbound JSON body: {Message}", jex.Message);
+            return Result.Fail($"Invalid JSON format: {jex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log.Logger.Error(ex, "Unable to parse inbound JSON body");
+            return Result.Fail("Unexpected error.");
+        }
+    }
+
+    private static object JsonizeError(string error)
+    {
+        return new { error };
     }
 }
