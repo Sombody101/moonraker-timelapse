@@ -470,7 +470,8 @@ class Timelapse:
         result = {"action": "newframe"}
         try:
             client = AsyncHTTPClient()
-            capture_url = f"{self.config["render_server"]}/api/timelapse/capture"
+            server_url = self.config["render_server"]
+            capture_url = f"{server_url}/api/timelapse/capture"
             capture_request = {
                 "job_id": print_name,
                 "layer": self.framecount,
@@ -695,7 +696,8 @@ class Timelapse:
         return result
 
     async def spinlock_render_request(self, jobId: str):
-        render_url = f"{self.config["render_server"]}/api/timelapse/render"
+        server_url = self.config["render_server"]
+        render_url = f"{server_url}/api/timelapse/render"
         logging.info(f"Requesting timelapse render from: {render_url}")
 
         client = AsyncHTTPClient()
@@ -740,7 +742,8 @@ class Timelapse:
                     raise Exception(str(json_doc["result"]))
 
     async def download_timelapse_render(self, jobId: str, local_target: str):
-        download_url = f"{self.config['render_server']}/api/timelapse/download/{jobId}"
+        server_url = self.config['render_server']
+        download_url = f"{server_url}/api/timelapse/download/{jobId}"
         logging.info(f"Downloading timelapse for print: {download_url}")
 
         client = AsyncHTTPClient()
