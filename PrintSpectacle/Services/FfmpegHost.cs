@@ -88,14 +88,6 @@ public sealed class FfmpegHost : IDisposable
         {
             // WIP
             return ARGS_SW;
-
-            s_cachedVendor ??= GetCpuVendor();
-
-            return s_cachedVendor switch
-            {
-                CpuVendor.Intel => ARGS_QSV,
-                CpuVendor.AMD => ARGS_AMF,
-            };
         }
 
         private static CpuVendor GetCpuVendor()
