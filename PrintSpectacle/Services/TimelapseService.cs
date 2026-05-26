@@ -46,7 +46,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
     {
         try
         {
-            return JobManager.GetJobStatus(jobId);
+            return JobManager.GetJobStatus(SanitizeJobId(jobId));
         }
         catch (Exception ex)
         {
@@ -76,18 +76,25 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
     {
         JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
 
-        string jobDirectory = GetCaptureDirectory(jobId);
-        _ = Directory.CreateDirectory(jobDirectory);
-        string snapshotPath = Path.Combine(jobDirectory, $"{layer.ToString().PadLeft(6, '0')}.jpg");
-
-        if (!force && File.Exists(snapshotPath))
+        try
         {
-            string error = $"Snapshot for layer {layer} already exists for job '{jobId}'";
-            jobHandle.SetResult(error, JobManager.JobStatus.Errored);
-            throw new InvalidOperationException(error);
-        }
+            string jobDirectory = GetCaptureDirectory(jobId);
+            _ = Directory.CreateDirectory(jobDirectory);
+            string snapshotPath = Path.Combine(jobDirectory, $"{layer.ToString().PadLeft(6, '0')}.jpg");
 
-        await FetchCaptureAsync(cameraUrl, snapshotPath, token);
+            if (!force && File.Exists(snapshotPath))
+            {
+                string error = $"Snapshot for layer {layer} already exists for job '{jobId}'";
+                jobHandle.SetResult(error, JobManager.JobStatus.Errored);
+                throw new InvalidOperationException(error);
+            }
+
+            await FetchCaptureAsync(cameraUrl, snapshotPath, token);
+        }
+        catch (Exception ex)
+        {
+            jobHandle.SetResult(ex.Message, JobManager.JobStatus.Errored);
+        }
     }
 
     private static async Task RenderAsync(string jobId, bool force, CancellationToken token)
@@ -95,33 +102,33 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
         jobHandle.Status = JobManager.JobStatus.Starting;
 
-        string captureDirectory = GetCaptureDirectory(jobId);
-
-        if (!Directory.Exists(captureDirectory))
-        {
-            MissingJobDirectoryException.Throw(jobId);
-        }
-
-        string timelapseDirectory = GetTimelapseDirectory(jobId);
-        _ = Directory.CreateDirectory(timelapseDirectory);
-
-        string outputTimelapse = Path.Combine(timelapseDirectory, "timelapse.mp4");
-
-        if (!force && File.Exists(outputTimelapse))
-        {
-            string error = $"Timelapse already exists for job '{jobId}'";
-            jobHandle.SetResult(error, JobManager.JobStatus.Errored);
-            throw new InvalidOperationException(error);
-        }
-
-        using FfmpegHost ffmpeg = new(captureDirectory, outputTimelapse);
-
-        DuplicateFinalFrame(captureDirectory);
-
-        jobHandle.Status = JobManager.JobStatus.Running;
-
         try
         {
+            string captureDirectory = GetCaptureDirectory(jobId);
+
+            if (!Directory.Exists(captureDirectory))
+            {
+                MissingJobDirectoryException.Throw(jobId);
+            }
+
+            string timelapseDirectory = GetTimelapseDirectory(jobId);
+            _ = Directory.CreateDirectory(timelapseDirectory);
+
+            string outputTimelapse = Path.Combine(timelapseDirectory, "timelapse.mp4");
+
+            if (!force && File.Exists(outputTimelapse))
+            {
+                string error = $"Timelapse already exists for job '{jobId}'";
+                jobHandle.SetResult(error, JobManager.JobStatus.Errored);
+                throw new InvalidOperationException(error);
+            }
+
+            using FfmpegHost ffmpeg = new(captureDirectory, outputTimelapse);
+
+            DuplicateFinalFrame(captureDirectory);
+
+            jobHandle.Status = JobManager.JobStatus.Running;
+
             await ffmpeg.StartFfmpegAsync(token);
         }
         catch (Exception ex)
