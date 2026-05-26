@@ -15,14 +15,14 @@ public class EnvironmentVariableResolver<T>
             string variableName = attribute.VariableName;
             if (Environment.GetEnvironmentVariable(variableName) is string environmentValue)
             {
-                var propertyValue = Convert.ChangeType(environmentValue, property.PropertyType);
+                object propertyValue = Convert.ChangeType(environmentValue, property.PropertyType);
                 property.SetValue(this, propertyValue);
                 continue;
             }
 
-            if (attribute.DefaultValue is object defaultObject)
+            if (attribute.DefaultValue is object defaultObject && defaultObject is not null)
             {
-                var defaultValue = Convert.ChangeType(defaultObject, property.PropertyType);
+                object defaultValue = Convert.ChangeType(defaultObject, property.PropertyType);
                 property.SetValue(this, defaultValue);
             }
         }

@@ -73,15 +73,17 @@ public sealed class FfmpegHost : IDisposable
         public static string CreateFfmpegArgs(string outputPath, int frameCount)
         {
             ContainerConfiguration config = Program.GetRequiredService<ContainerConfiguration>();
-            int targetFps = CalculateTargetFps(frameCount);
+            int targetFps = config.DynamicFps
+                ? CalculateTargetFps(frameCount, config.TargetRuntime, config.DynamicFpsMin, config.DynamicFpsMax)
+                : config.RenderFps;
 
             string argsFormatter = GetArgsString();
             return string.Format(argsFormatter, outputPath, config.Threads, targetFps);
         }
 
-        private static int CalculateTargetFps(int frameCount)
+        private static int CalculateTargetFps(int frameCount, int target, int min, int max)
         {
-            return Math.Max(Math.Min(frameCount / 10, 60), 5);
+            return Math.Max(Math.Min(frameCount / target, max), min);
         }
 
         private static string GetArgsString()
