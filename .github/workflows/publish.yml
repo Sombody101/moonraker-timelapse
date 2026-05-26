@@ -2,7 +2,8 @@ name: Build and Push
 
 on:
   push:
-    branches: [ "main" ]
+    paths:
+      - PrintSpectacle/
 
 env:
   REGISTRY: ghcr.io
