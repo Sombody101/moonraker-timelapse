@@ -151,12 +151,12 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         }
 
         string lastFrame = Directory.GetFiles(directory, "*.jpg")
-            .Select(s => s.TrimStart(directory).ToString())
+            .Select(s => s.Replace(directory, "").ToString())
             .OrderByDescending(f => f)
             .FirstOrDefault()
             ?? throw new InvalidOperationException("Failed to get final layer for duplication");
 
-        if (!int.TryParse(lastFrame.TrimEnd(".jpg"), out int layer))
+        if (!int.TryParse(lastFrame.TrimStart('/').Replace(".jpg", ""), out int layer))
         {
             throw new InvalidOperationException("Unable to get layer number for final layer duplication");
         }
