@@ -7,5 +7,8 @@ public sealed record RenderRequest(
     string JobID,
 
     [property:JsonPropertyName("additional_ffmpeg_args")]
-    string? FfmpegAdditionalArgs = null
+    string? FfmpegAdditionalArgs = null,
+
+    [property:JsonPropertyName("force")]
+    bool Force = false
 );

@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using PrintSpectacle.Models;
 
 namespace PrintSpectacle.Services;
 
@@ -24,7 +25,7 @@ public sealed class FfmpegHost : IDisposable
         };
     }
 
-    public async Task StartFfmpegAsync()
+    public async Task StartFfmpegAsync(CancellationToken token)
     {
         StringBuilder stderrBuff = new();
         _ffmpegProcess.ErrorDataReceived += (sender, args) =>
@@ -38,7 +39,7 @@ public sealed class FfmpegHost : IDisposable
         _ = _ffmpegProcess.Start();
         _ffmpegProcess.BeginErrorReadLine();
 
-        await _ffmpegProcess.WaitForExitAsync();
+        await _ffmpegProcess.WaitForExitAsync(token);
 
         if (_ffmpegProcess.ExitCode is not 0)
         {
@@ -54,6 +55,9 @@ public sealed class FfmpegHost : IDisposable
 
     private static class ArgumentProvider
     {
+        private const string ARGS_SW = "-loglevel error -framerate 30 -i \"%d.jpg\" -threads {1} -g 5 -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -y {0}";
+
+        [Obsolete]
         private const string
             ARGS_QSV = "-loglevel error -framerate 30 -i \"%d.jpg\" -vf \"format=nv12,hwupload\" -g 150 -c:v h264_qsv -preset medium -global_quality 23 -look_ahead 1 -b:v 0 -maxrate 0 -bufsize 0 -pix_fmt nv12 -y {0}",
             ARGS_AMF = "-loglevel error -framerate 30 -i \"%d.jpg\" -vf \"format=nv12,hwupload\" -g 150 -c:v h264_amf -usage transcoding -quality balanced -rc cqp -q 23 -pix_fmt nv12 -y {0}";
@@ -62,12 +66,17 @@ public sealed class FfmpegHost : IDisposable
 
         public static string CreateFfmpegArgs(string outputPath)
         {
+            ContainerConfiguration config = Program.GetRequiredService<ContainerConfiguration>();
+
             string argsFormatter = GetArgsString();
-            return string.Format(argsFormatter, outputPath);
+            return string.Format(argsFormatter, outputPath, config.Threads);
         }
 
         private static string GetArgsString()
         {
+            // WIP
+            return ARGS_SW;
+
             s_cachedVendor ??= GetCpuVendor();
 
             return s_cachedVendor switch

@@ -1,5 +1,6 @@
-
 using System.Text.Json;
+using FluentResults;
+using Microsoft.AspNetCore.Mvc;
 using PrintSpectacle.Models;
 using PrintSpectacle.Services;
 using Serilog;
@@ -9,6 +10,18 @@ namespace PrintSpectacle;
 
 public sealed class Program
 {
+    private static IServiceProvider s_serviceProvider = null!;
+
+    public static T? GetService<T>()
+    {
+        return s_serviceProvider.GetService<T>();
+    }
+
+    public static T GetRequiredService<T>() where T : notnull
+    {
+        return s_serviceProvider.GetRequiredService<T>();
+    }
+
     public static void Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -33,13 +46,16 @@ public sealed class Program
             _ = builder.AddSerilog(logger);
         });
 
+        var containerConfig = new ContainerConfiguration();
         _ = builder.Services
             .AddHostedService<QueuedWorker>()
             .AddSingleton(httpClient)
             .AddSingleton<ITimelapseService, TimelapseService>()
-            .AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+            .AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>()
+            .AddSingleton(containerConfig);
 
         WebApplication app = builder.Build();
+        s_serviceProvider = app.Services;
 
         if (app.Environment.IsDevelopment())
         {
@@ -48,8 +64,6 @@ public sealed class Program
 
         _ = app.UseAuthorization();
         _ = app.MapControllers();
-
-        var containerConfig = new ContainerConfiguration();
 
         if (!Directory.Exists("/data"))
         {
@@ -70,7 +84,13 @@ public sealed class Program
                 return Results.BadRequest("Invalid JSON format.");
             }
 
-            await service.TakeSnapshotAsync(containerConfig, capture, token);
+            Result result = await service.TakeSnapshotAsync(containerConfig, capture, token);
+            if (result.IsFailed)
+            {
+                IError error = result.Errors[0];
+                return Results.InternalServerError(error.Message);
+            }
+
             return Results.Ok();
         });
 
@@ -92,8 +112,24 @@ public sealed class Program
 
         _ = app.MapGet("/api/timelapse/status/{jobId}", async (string jobId, ITimelapseService service) =>
         {
-            string statusJson = service.GetJobStatusJson(jobId);
-            return statusJson;
+            return Result.Ok(service.GetJobStatusJson(jobId));
+        });
+
+        _ = app.MapGet("/api/timelapse/download/{jobId}", async (string jobId, ITimelapseService service) =>
+        {
+            Result<FileStreamResult> renderStream = service.GetRenderedJobStream(jobId);
+            if (renderStream.IsFailed)
+            {
+                IError error = renderStream.Errors[0];
+                return Results.InternalServerError(error.Message);
+            }
+
+            FileStreamResult stream = renderStream.Value;
+            return Results.File(
+                stream.FileStream,
+                stream.ContentType,
+                stream.FileDownloadName
+            );
         });
 
         app.Run();

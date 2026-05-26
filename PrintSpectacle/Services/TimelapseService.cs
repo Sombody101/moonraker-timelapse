@@ -1,30 +1,30 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FluentResults;
+using Microsoft.AspNetCore.Mvc;
 using PrintSpectacle.Models;
 
 namespace PrintSpectacle.Services;
 
 public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseService> _logger) : ITimelapseService
 {
-    /*
-     * Required actions:
-     *  Take snapshot
-     *  Render snapshots
-     */
-
-    public async Task TakeSnapshotAsync(ContainerConfiguration config, CaptureRequest payload, CancellationToken token)
+    public async Task<Result> TakeSnapshotAsync(ContainerConfiguration config, CaptureRequest payload, CancellationToken token)
     {
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.JobID);
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.SnapshotURL);
 
-            await CaptureAsync(payload.JobID, payload.Layer, payload.SnapshotURL, token);
+            await CaptureAsync(payload.JobID, payload.Layer, payload.SnapshotURL, payload.Force, token);
+            return Result.Ok();
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to capture snapshot: {Message}", ex.Message);
+            string error = $"Failed to capture snapshot: {ex.Message}";
+            _logger.LogError(ex, error);
+            return Result.Fail(error);
         }
     }
 
@@ -34,7 +34,7 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(payload.JobID);
 
-            await RenderAsync(payload.JobID);
+            await RenderAsync(payload.JobID, payload.Force, token);
         }
         catch (Exception ex)
         {
@@ -55,20 +55,44 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         }
     }
 
-    private async Task CaptureAsync(string jobId, int layer, string cameraUrl, CancellationToken token)
+    public Result<FileStreamResult> GetRenderedJobStream(string jobId)
     {
-        using JobManager.RenderJobInfo jobHandle = JobManager.For(jobId);
+        string timelapsePath = Path.Combine(GetTimelapseDirectory(jobId), "timelapse.mp4");
+        if (!File.Exists(timelapsePath))
+        {
+            return Result.Fail($"There is no timelapse for job '{jobId}'");
+        }
+
+        FileStream fs = File.OpenRead(timelapsePath);
+        var fileResult = new FileStreamResult(fs, new Microsoft.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream"))
+        {
+            FileDownloadName = "timelapse.mp4"
+        };
+
+        return Result.Ok(fileResult);
+    }
+
+    private async Task CaptureAsync(string jobId, int layer, string cameraUrl, bool force, CancellationToken token)
+    {
+        JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
 
         string jobDirectory = GetCaptureDirectory(jobId);
         _ = Directory.CreateDirectory(jobDirectory);
         string snapshotPath = Path.Combine(jobDirectory, $"{layer}.jpg");
 
+        if (!force && File.Exists(snapshotPath))
+        {
+            string error = $"Snapshot for layer {layer} already exists for job '{jobId}'";
+            jobHandle.SetResult(error, JobManager.JobStatus.Errored);
+            throw new InvalidOperationException(error);
+        }
+
         await FetchCaptureAsync(cameraUrl, snapshotPath, token);
     }
 
-    private async Task RenderAsync(string jobId)
+    private static async Task RenderAsync(string jobId, bool force, CancellationToken token)
     {
-        using JobManager.RenderJobInfo jobHandle = JobManager.For(jobId);
+        JobManager.RenderJobInfo jobHandle = JobManager.GetJob(jobId);
         jobHandle.Status = JobManager.JobStatus.Starting;
 
         string captureDirectory = GetCaptureDirectory(jobId);
@@ -79,22 +103,28 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
         }
 
         string timelapseDirectory = GetTimelapseDirectory(jobId);
-        Directory.CreateDirectory(timelapseDirectory);
+        _ = Directory.CreateDirectory(timelapseDirectory);
 
         string outputTimelapse = Path.Combine(timelapseDirectory, "timelapse.mp4");
 
-        FfmpegHost ffmpeg = new(captureDirectory, outputTimelapse);
+        if (!force && File.Exists(outputTimelapse))
+        {
+            string error = $"Timelapse already exists for job '{jobId}'";
+            jobHandle.SetResult(error, JobManager.JobStatus.Errored);
+            throw new InvalidOperationException(error);
+        }
+
+        using FfmpegHost ffmpeg = new(captureDirectory, outputTimelapse);
 
         jobHandle.Status = JobManager.JobStatus.Running;
 
         try
         {
-            await ffmpeg.StartFfmpegAsync();
+            await ffmpeg.StartFfmpegAsync(token);
         }
         catch (Exception ex)
         {
-            jobHandle.Status = JobManager.JobStatus.Errored;
-            jobHandle.SetResult(ex.Message);
+            jobHandle.SetResult(ex.Message, JobManager.JobStatus.Errored);
             throw;
         }
 
@@ -120,30 +150,40 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
 
     private static class JobManager
     {
-        private static readonly HashSet<RenderJobInfo> s_currentJobs = [];
+        private static readonly ConcurrentDictionary<string, RenderJobInfo> s_currentJobs = [];
 
-        public static RenderJobInfo For(string jobId)
+        public static RenderJobInfo GetJob(string jobId)
         {
-            if (s_currentJobs.Any(j => j.JobID == jobId))
+            return GetJobFromID(jobId) ?? StartJob(jobId);
+        }
+
+        public static RenderJobInfo GetRequiredJob(string jobId)
+        {
+            return GetRequiredJobFromID(jobId);
+        }
+
+        private static RenderJobInfo StartJob(string jobId)
+        {
+            var job = new RenderJobInfo(jobId, JobStatus.Starting);
+            if (!s_currentJobs.TryAdd(jobId, job))
             {
                 DuplicatJobException.Throw(jobId);
             }
 
-            return new RenderJobInfo(jobId, JobStatus.Starting);
+            return job;
         }
 
         public static string GetJobStatus(string jobId)
         {
-            RenderJobInfo? job = GetJobFromID(jobId);
+            RenderJobInfo? job = GetRequiredJobFromID(jobId);
 
             // Entirely sketchy since it's a private class and may change at any point
             return JsonSerializer.Serialize(job);
         }
 
-        private static RenderJobInfo GetJobFromID(string jobId)
+        private static RenderJobInfo GetRequiredJobFromID(string jobId)
         {
-            RenderJobInfo? job = s_currentJobs.FirstOrDefault(j => j.JobID == jobId);
-
+            RenderJobInfo? job = GetJobFromID(jobId);
             if (job is null)
             {
                 NonexistentJobException.Throw(jobId);
@@ -152,7 +192,12 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
             return job;
         }
 
-        public sealed class RenderJobInfo(string jobID, JobStatus jobStatus) : IDisposable
+        private static RenderJobInfo? GetJobFromID(string jobId)
+        {
+            return s_currentJobs.GetValueOrDefault(jobId);
+        }
+
+        public sealed class RenderJobInfo(string jobID, JobStatus jobStatus)
         {
             public static readonly string EmptyJsonPayload = JsonSerializer.Serialize(new RenderJobInfo("none", JobStatus.Invalid));
 
@@ -165,23 +210,17 @@ public sealed class TimelapseService(HttpClient _httpClient, ILogger<TimelapseSe
             [JsonPropertyName("result")]
             public string? Result { get; private set; }
 
-            public void SetResult(string result)
+            public void SetResult(string result, JobStatus status)
             {
-                if (Result is not null && result is not null)
-                {
-                    Result = result;
-                }
-            }
-
-            public void Dispose()
-            {
-                _ = s_currentJobs.Remove(this);
+                Result = result;
+                Status = status;
             }
         }
 
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public enum JobStatus
         {
+            Idle,
             Starting,
             Running,
             Complete,

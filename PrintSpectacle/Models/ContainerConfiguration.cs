@@ -7,4 +7,6 @@ namespace PrintSpectacle.Models;
 /// </summary>
 public sealed class ContainerConfiguration() : EnvironmentVariableResolver<TimelapseService>()
 {
+    [EnvVar("THREADS")]
+    public int Threads { get; init; } = Environment.ProcessorCount / 2;
 }

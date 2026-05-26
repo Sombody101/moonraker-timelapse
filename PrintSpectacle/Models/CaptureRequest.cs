@@ -10,5 +10,8 @@ public sealed record CaptureRequest(
     int Layer,
 
     [property:JsonPropertyName("snapshot_url"), JsonRequired]
-    string SnapshotURL
+    string SnapshotURL,
+
+    [property:JsonPropertyName("force")]
+    bool Force = false
 );
