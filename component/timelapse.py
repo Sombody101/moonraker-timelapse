@@ -490,7 +490,7 @@ class Timelapse:
                 body=json.dumps(capture_request),
             )
 
-            logging.info(f"Requesting capture from: {capture_url}")
+            logging.debug(f"Requesting capture from: {capture_url}")
             await client.fetch(request)
 
             result.update(
@@ -548,6 +548,7 @@ class Timelapse:
 
     def cleanup(self) -> None:
         logging.debug("cleanup frame directory")
+        return # no temp files since ffmpeg is gone
         filelist = glob.glob(self.temp_dir + "frame*.jpg")
         if filelist:
             for filepath in filelist:
