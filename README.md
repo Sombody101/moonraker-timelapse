@@ -1,3 +1,9 @@
+>[!WARNING]
+> This fork of moonraker-timelapse is ***incredibly specific to my needs*** and requires a server to run a docker container for rendering
+> timelapses on a non-shitty APU.
+>
+> I would not recommend using this unless you make proper alterations for your setup.
+
 # Moonraker-timelapse
 
 A 3rd party Moonraker component to create timelapse of 3D prints.
