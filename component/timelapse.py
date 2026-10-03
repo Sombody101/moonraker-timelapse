@@ -145,7 +145,6 @@ class Timelapse:
         self.server.register_event_handler(
             "server:klippy_ready", self.handle_klippy_ready
         )
-        self.server.register_event_handler()
         self.server.register_remote_method("timelapse_newframe", self.call_newframe)
         self.server.register_remote_method(
             "timelapse_saveFrames", self.call_saveFramesZip
