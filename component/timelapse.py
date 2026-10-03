@@ -145,11 +145,11 @@ class Timelapse:
         self.server.register_event_handler(
             "server:klippy_ready", self.handle_klippy_ready
         )
+        self.server.register_event_handler()
         self.server.register_remote_method("timelapse_newframe", self.call_newframe)
         self.server.register_remote_method(
             "timelapse_saveFrames", self.call_saveFramesZip
         )
-        self.server.register_remote_method("timelapse_init", self.timelapse_init)
         self.server.register_remote_method("timelapse_render", self.call_render)
         self.server.register_endpoint(
             "/machine/timelapse/render", ["POST"], self.render
@@ -163,13 +163,39 @@ class Timelapse:
         self.server.register_endpoint(
             "/machine/timelapse/lastframeinfo", ["GET"], self.webrequest_lastframeinfo
         )
+        
+        self.server.register_notification(
+            "notify_status_update", self._handle_status_update
+        )
 
     async def component_init(self) -> None:
         await self.getWebcamConfig()
 
-    def timelapse_init(self, file_name: str):
+    def _handle_status_update(self, data, eventtime):
+        print_stats = data.get("print_stats", {})
+        state = print_stats.get("state")
+
+        if state == "printing":
+            filename = print_stats.get("filename", "unknown_job")
+            self._start_new_job(filename)
+        elif state in ("complete", "error", "cancelled"):
+            self._finalize_job()
+
+    def _start_new_job(self, file_name: str):
+        if self.job_id is not None:
+            return
+
         now = datetime.now().strftime("%Y.%d.%m.%H.%M")
-        self.job_id = f"print_{file_name}_{now}"
+        clean_name = file_name.split("/")[-1]
+        self.job_id = f"print_{clean_name}_{now}"
+        self.framecount = 0
+        logging.info(f"Moonraker Event: Starting timelapse job {self.job_id}")
+
+    def _finalize_job(self):
+        if self.job_id:
+            logging.info(f"Finalizing job {self.job_id} with {self.framecount} frames.")
+            self.job_id = None
+            self.framecount = 0
 
     def overwriteDbconfigWithConfighelper(self) -> None:
         blockedsettings = []
@@ -301,6 +327,7 @@ class Timelapse:
             for setting in args:
                 if setting in self.config:
                     settingtype = type(self.config[setting])
+                    settingvalue: Any = None
                     if setting == "snapshoturl":
                         logging.debug("snapshoturl cannot be changed via webrequest")
                     elif settingtype == str:
@@ -548,7 +575,7 @@ class Timelapse:
 
     def cleanup(self) -> None:
         logging.debug("cleanup frame directory")
-        return # no temp files since ffmpeg is gone
+        return  # no temp files since ffmpeg is gone
         filelist = glob.glob(self.temp_dir + "frame*.jpg")
         if filelist:
             for filepath in filelist:
@@ -790,10 +817,11 @@ class Timelapse:
     def ffmpeg_cb(self, response):
         # logging.debug(f"ffmpeg_cb: {response}")
         self.lastcmdreponse = response.decode("utf-8")
+        frame = 0
         try:
-            frame = re.search(
-                r"(?<=frame=)*(\d+)(?=.+fps)", self.lastcmdreponse
-            ).group()
+            f = re.search(r"(?<=frame=)*(\d+)(?=.+fps)", self.lastcmdreponse)
+            if f:
+                frame = f.group()
         except AttributeError:
             return
         percent = int(frame) / self.framecount * 100
