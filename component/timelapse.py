@@ -126,7 +126,7 @@ class Timelapse:
         # evaluate and expand "~"
         self.out_dir = os.path.expanduser(out_dir_cfg)
         self.temp_dir = os.path.expanduser(temp_dir_cfg)
-        self.job_id = ""
+        self.job_id = None
         # create directories if they doesn't exist
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.out_dir, exist_ok=True)
