@@ -11,4 +11,14 @@ public sealed record RenderRequest(
 
     [property:JsonPropertyName("force")]
     bool Force = false
-);
+)
+{
+    public override string ToString()
+    {
+        string ffmpegArgs = FfmpegAdditionalArgs?.Length > 0
+            ? string.Join(' ', FfmpegAdditionalArgs)
+            : string.Empty;
+
+        return $"{{ job_id: '{JobID}', force: {Force}, ffmpeg_args: [{ffmpegArgs}] }}";
+    }
+};

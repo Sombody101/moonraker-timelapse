@@ -10,7 +10,9 @@ public interface ITimelapseService
 
     public Task RenderSnapshotsAsync(ContainerConfiguration config, RenderRequest payload, CancellationToken token);
 
-    public string GetJobStatusJson(string jobId);
+    public RenderJobInfo GetJobStatus(string jobId);
+
+    public IEnumerable<RenderJobInfo> GetAllJobs();
 
     public Result<FileStreamResult> GetRenderedJobStream(string jobId);
 }

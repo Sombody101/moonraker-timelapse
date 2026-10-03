@@ -14,4 +14,10 @@ public sealed record CaptureRequest(
 
     [property:JsonPropertyName("force")]
     bool Force = false
-);
+)
+{
+    public override string ToString()
+    {
+        return $"{{ job_id: '{JobID}', layer: {Layer}, force: {Force}, snapshot_url: '{SnapshotURL}' }}";
+    }
+};
