@@ -8,4 +8,5 @@ dependencies = [
     "confighelper>=0.0.3",
     "tornado>=6.5.5",
     "webcam>=1.34",
+    "websockets>=16.0",
 ]
