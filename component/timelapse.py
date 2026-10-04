@@ -175,9 +175,10 @@ class Timelapse:
         await self.getWebcamConfig()
 
     def _handle_status_update(self, data, eventtime):
+        logging.debug(f"RAW UPDATE: {data}")
         print_stats = data.get("print_stats", {})
 
-        if "state" not in print_stats:
+        if not print_stats:
             return
 
         state = print_stats.get("state")
