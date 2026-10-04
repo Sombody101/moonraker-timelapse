@@ -1,0 +1,23 @@
+M117 Starting Timelapse Synthetic Test
+
+G4 P500 ; Dwell 500ms
+TIMELAPSE_TAKE_FRAME
+M117 Captured Frame 1
+
+G4 P500
+TIMELAPSE_TAKE_FRAME
+M117 Captured Frame 2
+
+G4 P500
+TIMELAPSE_TAKE_FRAME
+M117 Captured Frame 3
+
+G4 P500
+TIMELAPSE_TAKE_FRAME
+M117 Captured Frame 4
+
+G4 P500
+TIMELAPSE_TAKE_FRAME
+M117 Captured Frame 5
+
+M117 Test complete
