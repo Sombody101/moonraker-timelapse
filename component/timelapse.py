@@ -661,10 +661,9 @@ class Timelapse:
         # run the command
         self.notify_event(result)
         render_status = True
-        job_id = self.job_id
         try:
-            await self.spinlock_render_request(job_id)
-            await self.download_timelapse_render(job_id, outfile_path)
+            await self.spinlock_render_request(self.job_id)
+            await self.download_timelapse_render(self.job_id, outfile_path)
         except Exception as ex:
             logging.exception(f"Render request failed: {ex}")
             render_status = False

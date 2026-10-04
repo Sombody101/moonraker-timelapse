@@ -101,7 +101,7 @@ public sealed class TimelapseService(
 
             if (jobHandle.LastFrameIndex + 1 != layer)
             {
-                _logger.LogWarning("Capture request dictates for the capture of frame {NewLayer}, but the previous frame was {PrevLayer} (difference of {Diff}). Skipping layer count and proceeding.",
+                _logger.LogWarning("Frame skip: requested {NewLayer}, previous frame was {PrevLayer} ({Diff} layer diff)",
                     layer,
                     jobHandle.LastFrameIndex,
                     Math.Abs(layer - jobHandle.LastFrameIndex));
