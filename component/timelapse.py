@@ -167,21 +167,15 @@ class Timelapse:
             "/machine/timelapse/lastframeinfo", ["GET"], self.webrequest_lastframeinfo
         )
 
-        self.server.register_notification(
-            "notify_status_update", self._handle_status_update
-        )
-
     async def component_init(self) -> None:
         await self.getWebcamConfig()
 
-    def _handle_status_update(self, data, eventtime):
-        logging.debug(f"RAW UPDATE: {data}")
-        print_stats = data.get("print_stats", {})
-
-        if not print_stats:
-            return
+    def _on_print_stats_update(self, print_stats):
+        logging.debug(f"RAW UPDATE: {print_stats}")
 
         state = print_stats.get("state")
+        if not state:
+            return
 
         if state == "printing":
             if self._is_paused:
@@ -406,6 +400,10 @@ class Timelapse:
 
         ioloop = IOLoop.current()
         ioloop.spawn_callback(self.stop_hyperlapse)
+
+        printer = self.server.lookup_component("printer")
+        printer.register_sensor("print_stats", self._on_print_stats_update)
+        logging.debug("Registered sensor listener for print_stats")
 
     async def setgcodevariables(self) -> None:
         gcommand = (

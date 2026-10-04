@@ -1,6 +1,8 @@
 M117 Starting Timelapse Synthetic Test
 
-G4 P500 ; Dwell 500ms
+M109 S175
+
+G4 P500
 TIMELAPSE_TAKE_FRAME
 M117 Captured Frame 1
 
@@ -21,3 +23,5 @@ TIMELAPSE_TAKE_FRAME
 M117 Captured Frame 5
 
 M117 Test complete
+
+M104 S0
