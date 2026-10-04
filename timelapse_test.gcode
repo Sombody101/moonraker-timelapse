@@ -1,3 +1,5 @@
+TIMELAPSE_INIT
+
 M117 Starting Timelapse Synthetic Test
 
 M109 S175
