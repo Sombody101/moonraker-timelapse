@@ -126,7 +126,11 @@ class Timelapse:
         # evaluate and expand "~"
         self.out_dir = os.path.expanduser(out_dir_cfg)
         self.temp_dir = os.path.expanduser(temp_dir_cfg)
+
         self.job_id = None
+        self.framecount = 0
+        self._is_paused = False
+
         # create directories if they doesn't exist
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.out_dir, exist_ok=True)
@@ -162,7 +166,7 @@ class Timelapse:
         self.server.register_endpoint(
             "/machine/timelapse/lastframeinfo", ["GET"], self.webrequest_lastframeinfo
         )
-        
+
         self.server.register_notification(
             "notify_status_update", self._handle_status_update
         )
@@ -172,29 +176,43 @@ class Timelapse:
 
     def _handle_status_update(self, data, eventtime):
         print_stats = data.get("print_stats", {})
+
+        if "state" not in print_stats:
+            return
+
         state = print_stats.get("state")
 
         if state == "printing":
-            filename = print_stats.get("filename", "unknown_job")
-            self._start_new_job(filename)
+            if self._is_paused:
+                # Resuming from a pause: do not start a new job or reset framecount
+                logging.info(f"Print resumed for job {self.job_id}")
+                self._is_paused = False
+            elif self.job_id is None:
+                filename = print_stats.get("filename", "unknown_job")
+                self._start_new_job(filename)
+
+        elif state == "paused":
+            logging.info(f"Print paused for job {self.job_id}")
+            self._is_paused = True
+
         elif state in ("complete", "error", "cancelled"):
+            self._is_paused = False
             self._finalize_job()
 
     def _start_new_job(self, file_name: str):
-        if self.job_id is not None:
-            return
-
         now = datetime.now().strftime("%Y.%d.%m.%H.%M")
         clean_name = file_name.split("/")[-1]
         self.job_id = f"print_{clean_name}_{now}"
         self.framecount = 0
-        logging.info(f"Moonraker Event: Starting timelapse job {self.job_id}")
+        self._is_paused = False
+        logging.info(f"Starting new timelapse job {self.job_id}")
 
     def _finalize_job(self):
         if self.job_id:
             logging.info(f"Finalizing job {self.job_id} with {self.framecount} frames.")
             self.job_id = None
             self.framecount = 0
+            self._is_paused = False
 
     def overwriteDbconfigWithConfighelper(self) -> None:
         blockedsettings = []
